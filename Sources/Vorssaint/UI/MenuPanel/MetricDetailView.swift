@@ -5,13 +5,14 @@ import AppKit
 import SwiftUI
 
 enum MetricDetailKind: String, Equatable, Identifiable {
-    case cpu, gpu, memory, network, disk, battery, power, fan, connectedDevices
+    case cpu, gpu, memory, network, disk, battery, power, fan, connectedDevices, agents
 
     var id: String { rawValue }
 
     var panelSection: PanelSectionID {
         switch self {
-        case .cpu, .gpu, .memory, .connectedDevices:
+        // AI limits have no section of their own yet; System hosts them.
+        case .cpu, .gpu, .memory, .connectedDevices, .agents:
             return .system
         case .network:
             return .network
@@ -35,6 +36,7 @@ enum MetricDetailKind: String, Equatable, Identifiable {
         case .power: return "powerplug.fill"
         case .fan: return "fanblades"
         case .connectedDevices: return "cable.connector"
+        case .agents: return "sparkles"
         }
     }
 
@@ -64,6 +66,8 @@ enum MetricDetailKind: String, Equatable, Identifiable {
             return SystemMonitorPanelNeeds(fanSpeed: true)
         case .connectedDevices:
             return SystemMonitorPanelNeeds(connectedDevices: true)
+        case .agents:
+            return SystemMonitorPanelNeeds()
         }
     }
 
@@ -78,6 +82,7 @@ enum MetricDetailKind: String, Equatable, Identifiable {
         case .power: return s.powerSection
         case .fan: return FeatureStrings.fanControl(L10n.shared.language).menuBarTitle
         case .connectedDevices: return FeatureStrings.connectedDevices(L10n.shared.language).title
+        case .agents: return FeatureStrings.notchAgents(L10n.shared.language).restingTitle
         }
     }
 
@@ -88,7 +93,7 @@ enum MetricDetailKind: String, Equatable, Identifiable {
         case .memory: return .memory
         case .power: return .energy
         case .network: return .network
-        case .disk, .battery, .fan, .connectedDevices: return nil
+        case .disk, .battery, .fan, .connectedDevices, .agents: return nil
         }
     }
 }
@@ -161,6 +166,11 @@ struct MetricDetailView: View {
     private let processLimit = 15
 
     var body: some View {
+        // AI limits come from the agents, not from the system monitor.
+        if kind == .agents { AgentUsageDetailView() } else { systemBody }
+    }
+
+    private var systemBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             summaryCard
             detailCard
@@ -239,7 +249,7 @@ struct MetricDetailView: View {
             let peak = MetricFormat.graphCeiling(monitor.snapshot.systemPowerHistory.max() ?? 0, unitStep: 1000)
             historyGraph(monitor.snapshot.systemPowerHistory, color: summaryColor, maxValue: peak,
                          ceilingLabel: MetricFormat.watts(peak))
-        case .fan, .connectedDevices:
+        case .fan, .connectedDevices, .agents:
             EmptyView()
         }
     }
@@ -482,6 +492,8 @@ struct MetricDetailView: View {
                     device.vendorName ?? "",
                     symbolName: "cable.connector")
             }
+        case .agents:
+            return []
         }
     }
 
@@ -514,6 +526,8 @@ struct MetricDetailView: View {
             return String(format: strings.rpmFormat, Int(rpm.rounded()))
         case .connectedDevices:
             return "\(snapshot.connectedDevices.count)"
+        case .agents:
+            return "-"
         }
     }
 
@@ -553,6 +567,8 @@ struct MetricDetailView: View {
             let count = snapshot.connectedDevices.count
             let strings = FeatureStrings.connectedDevices(l10n.language)
             return strings.formattedCount(count)
+        case .agents:
+            return ""
         }
     }
 
@@ -570,7 +586,7 @@ struct MetricDetailView: View {
             return PanelMetricColor.green(for: colorScheme)
         case .power:
             return PanelMetricColor.orange(for: colorScheme)
-        case .fan, .connectedDevices:
+        case .fan, .connectedDevices, .agents:
             return PanelMetricColor.cyan(for: colorScheme)
         }
     }

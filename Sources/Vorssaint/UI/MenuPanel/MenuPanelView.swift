@@ -315,6 +315,7 @@ struct MenuPanelView: View {
         case .disk: return 360
         case .battery, .power: return 360
         case .fan, .connectedDevices: return 240
+        case .agents: return 300
         }
     }
 

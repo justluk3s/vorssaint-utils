@@ -40,6 +40,7 @@ enum NotchAgentTests {
         preferences(suite)
         limitUse(suite)
         menuBarReading(suite)
+        menuBarChoice(suite)
         agentDefaults(suite)
         formatting(suite)
         AgentUsageEventDeliveryTests.run(suite)
@@ -3146,6 +3147,88 @@ enum NotchAgentTests {
         suite.expect(decisions.allSatisfy {
             NotchAgentSupport.menuBarReading(islandOn: $0.0, readout: $0.1, canPresent: $0.2) == $0.3
         }, "without the island the menu bar runs the reading, paused while the Mac is locked or asleep")
+    }
+
+    private static func menuBarChoice(_ suite: TestSuite) {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func window(_ id: String, _ kind: AgentLimitWindow.Kind, _ minutes: Int?, scope: String? = nil,
+                    used: Double, resets: Date? = nil) -> AgentLimitWindow {
+            AgentLimitWindow(id: id, kind: kind, minutes: minutes, scope: scope, usedPercent: used,
+                             resetsAt: resets ?? now.addingTimeInterval(3600))
+        }
+        var snapshot = AgentUsageSnapshot()
+        snapshot.limits[.claude] = AgentLimits(provider: .claude, windows: [
+            window("claude.sd", .weekly, 10_080, used: 40),
+            window("claude.so", .weekly, 10_080, scope: "Opus", used: 10),
+            window("claude.fh", .session, 300, used: 21),
+        ], observedAt: now, source: .account)
+        snapshot.limits[.codex] = AgentLimits(provider: .codex, windows: [
+            window("codex.10080", .weekly, 10_080, used: 55, resets: now.addingTimeInterval(-60)),
+        ], observedAt: now, source: .sessionLog)
+        snapshot.limits[.copilot] = AgentLimits(provider: .copilot, windows: [], observedAt: now, source: .sessionLog)
+
+        suite.expect(AgentMenuBarSupport.providers(snapshot) == [.claude, .codex],
+                     "only agents reporting a limit window can be chosen for the menu bar")
+        suite.expect(AgentMenuBarSupport.windows(snapshot, provider: .claude).map(\.id) == ["claude.fh", "claude.sd", "claude.so"],
+                     "an agent's windows are offered shortest first")
+        let chosen = AgentMenuBarSupport.window(snapshot, provider: .claude, choice: "claude.sd", now: now)
+        suite.expect(chosen?.usedPercent == 40, "the chosen window is the one the menu bar reads")
+        suite.expect(AgentMenuBarSupport.window(snapshot, provider: .claude, choice: "claude.sn", now: now) == nil
+                        && AgentMenuBarSupport.window(snapshot, provider: .codex, choice: "claude.fh", now: now) == nil
+                        && AgentMenuBarSupport.window(snapshot, provider: .opencode, choice: "claude.fh", now: now) == nil,
+                     "a chosen window the agent does not report reads nothing rather than another window's figure")
+        suite.expect(AgentMenuBarSupport.window(snapshot, provider: .codex, choice: "codex.10080", now: now)?.usedPercent == 0,
+                     "a window that renewed since it was read counts from zero, as on the island")
+
+        // Nothing chosen: the session, else the plan's week, else nothing.
+        suite.expect(AgentMenuBarSupport.window(snapshot, provider: .claude, choice: nil, now: now)?.id == "claude.fh",
+                     "with no window chosen, the menu bar reads the session the agent reports")
+        var withoutSession = snapshot
+        withoutSession.limits[.claude]?.windows.removeAll { $0.id == "claude.fh" }
+        suite.expect(AgentMenuBarSupport.window(withoutSession, provider: .claude, choice: nil, now: now)?.id == "claude.sd"
+                        && AgentMenuBarSupport.window(withoutSession, provider: .claude, choice: "claude.fh", now: now) == nil,
+                     "without Claude Code the Claude app's week stands in for an aged-out session, unless the session was chosen")
+        var modelWeekOnly = snapshot
+        modelWeekOnly.limits[.claude]?.windows.removeAll { $0.scope == nil }
+        suite.expect(AgentMenuBarSupport.window(modelWeekOnly, provider: .claude, choice: nil, now: now) == nil
+                        && AgentMenuBarSupport.window(snapshot, provider: .copilot, choice: nil, now: now) == nil,
+                     "a model's own week or no window at all leaves nothing to follow")
+        let locale = Locale(identifier: "en_US")
+        if let chosen {
+            suite.expect(AgentMenuBarSupport.reading(chosen, display: .used, locale: locale) == AgentFormat.percent(0.4, locale: locale)
+                            && AgentMenuBarSupport.reading(chosen, display: .remaining, locale: locale) == AgentFormat.percent(0.6, locale: locale),
+                         "the menu bar shows what is left or used, as the island's setting says")
+        }
+
+        let text = NotchAgentStrings.enUS
+        func known(_ id: String) -> String? {
+            AgentMenuBarSupport.knownWindow(id: id).map { AgentMenuBarSupport.label($0, text: text, locale: locale) }
+        }
+        suite.expect(known("claude.fh") == text.session && known("claude.sd") == text.weekly
+                        && known("claude.so") == "\(text.weekly) · Opus"
+                        && known("codex.300") == text.session && known("codex.10080") == text.weekly
+                        && known("codex.individual") == text.readoutLimit,
+                     "a saved window that is not reported right now keeps its name in Settings")
+        suite.expect(known("codex.primary") == nil && known("gemini.month") == nil && known("") == nil,
+                     "an id no source makes has no name to keep")
+
+        let domain = "com.vorssaint.tests.notch-agent-menu-bar-choice"
+        let defaults = UserDefaults(suiteName: domain)!
+        defaults.removePersistentDomain(forName: domain)
+        defer { defaults.removePersistentDomain(forName: domain) }
+        defaults.set(Defaults.registeredDefaults[DefaultsKey.menuBarAgentUsageProvider],
+                     forKey: DefaultsKey.menuBarAgentUsageProvider)
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.menuBarAgentUsageWindow] == nil
+                        && AgentMenuBarSupport.provider(in: defaults) == .claude
+                        && AgentMenuBarSupport.windowChoice(in: defaults) == nil,
+                     "the menu bar follows Claude's windows until one is chosen")
+        defaults.set("", forKey: DefaultsKey.menuBarAgentUsageWindow)
+        let cleared = AgentMenuBarSupport.windowChoice(in: defaults) == nil
+        defaults.set("claude.fh", forKey: DefaultsKey.menuBarAgentUsageWindow)
+        suite.expect(cleared && AgentMenuBarSupport.windowChoice(in: defaults) == "claude.fh",
+                     "choosing another agent clears the window, and a chosen one is kept")
+        defaults.set("gemini", forKey: DefaultsKey.menuBarAgentUsageProvider)
+        suite.expect(AgentMenuBarSupport.provider(in: defaults) == .claude, "an unknown agent falls back to Claude")
     }
 
     private static func preferences(_ suite: TestSuite) {

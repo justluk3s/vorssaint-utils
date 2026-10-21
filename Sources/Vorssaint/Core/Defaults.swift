@@ -408,6 +408,8 @@ enum DefaultsKey {
     static let menuBarCombineTemperatures = "menuBarCombineTemperatures" // usage/charge + temperature in one block when possible
     static let menuBarSeparateMetrics = "menuBarSeparateMetrics" // one status item per active metric
     static let menuBarAgentUsage = "menuBarAgentUsage" // an AI plan limit in its own status item, with or without the island
+    static let menuBarAgentUsageProvider = "menuBarAgentUsageProvider" // AgentProvider raw value whose limit the item shows
+    static let menuBarAgentUsageWindow = "menuBarAgentUsageWindow" // AgentLimitWindow id, e.g. claude.fh; unset follows what is reported
     static let menuBarNetworkUploadFirst = "menuBarNetworkUploadFirst" // network menu bar block shows upload above download
     static let menuBarLabelStyle = "menuBarLabelStyle"     // compact | classic
     static let menuBarMemoryStyle = "menuBarMemoryStyle"   // dot | percent | both
@@ -1650,6 +1652,7 @@ enum Defaults {
         DefaultsKey.menuBarCombineTemperatures: true,
         DefaultsKey.menuBarSeparateMetrics: false,
         DefaultsKey.menuBarAgentUsage: false,
+        DefaultsKey.menuBarAgentUsageProvider: "claude",
         DefaultsKey.menuBarNetworkUploadFirst: false,
         DefaultsKey.menuBarLabelStyle: "compact",
         DefaultsKey.menuBarMemoryStyle: "percent",

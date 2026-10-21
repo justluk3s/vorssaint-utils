@@ -24,6 +24,10 @@ struct NotchAgentsSettingsControls: View {
     @AppStorage(DefaultsKey.notchAgentsLimitThreshold) private var limitThreshold = NotchAgentSupport.defaultLimitThreshold
     @AppStorage(DefaultsKey.notchAgentsDailyBudget) private var dailyBudget = 0.0
     @AppStorage(DefaultsKey.notchAgentsPriceUpdates) private var priceUpdates = true
+    @AppStorage(DefaultsKey.menuBarAgentUsage) private var menuBarReading = false
+    @AppStorage(DefaultsKey.menuBarAgentUsageProvider) private var menuBarProvider = AgentProvider.claude.rawValue
+    /// Empty until a window is chosen: the menu bar then follows what is reported.
+    @AppStorage(DefaultsKey.menuBarAgentUsageWindow) private var menuBarWindow = ""
     @State private var dragging: NotchAgentCard?
     @State private var roots: [AgentProvider: Bool] = [:]
     @State private var claudeApp: URL?
@@ -50,6 +54,13 @@ struct NotchAgentsSettingsControls: View {
             providerRow(.opencode, isOn: $opencode)
             providerRow(.copilot, isOn: $copilot)
             if codex { CodexAccountsSettings() }
+
+            Divider()
+            switchRow("menubar.rectangle", text.menuBarReading, isOn: $menuBarReading)
+            if menuBarReading {
+                menuBarChoice
+                    .padding(.leading, settingsRowTextInset)
+            }
 
             Divider()
             Text(text.cardsTitle).font(.subheadline.weight(.medium))
@@ -152,11 +163,49 @@ struct NotchAgentsSettingsControls: View {
             if claude { findClaudeApp() }
         }
         .onChange(of: claude) { _, on in if on { findClaudeApp() } }
+        // The island reads for the menu bar while it is on, the menu bar
+        // itself while it is off.
+        .onChange(of: menuBarReading) { _, _ in
+            if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
+            AgentUsageMenuBarRunner.shared.syncWithPreferences()
+        }
+        // Another agent's windows are not this one's: back to following them.
+        .onChange(of: menuBarProvider) { _, _ in menuBarWindow = "" }
         // Cards and agents set the page's height, and the live reading the
         // closed island's width, which the island follows.
         .onChange(of: [cardOrder, hiddenCards, String(claude), String(codex), String(opencode), String(copilot),
                        String(liveActivity), readout, limitDisplay, limitFocus]) { _, _ in
             NotchService.shared.syncWithPreferences()
+        }
+    }
+
+    /// Only agents and windows reported right now are offered. A saved
+    /// choice they do not report stays listed and says so, rather than the
+    /// menu bar quietly showing another figure.
+    private var menuBarChoice: some View {
+        let snapshot = usage.snapshot
+        let provider = AgentProvider(rawValue: menuBarProvider) ?? .claude
+        let providers = AgentMenuBarSupport.providers(snapshot)
+        let windows = AgentMenuBarSupport.windows(snapshot, provider: provider)
+        // Until one is chosen, the menu shows the window being followed.
+        let shown = menuBarWindow.isEmpty
+            ? AgentMenuBarSupport.automaticWindowID(snapshot, provider: provider) ?? "" : menuBarWindow
+        let window = Binding(get: { shown }, set: { menuBarWindow = $0 })
+        let savedWindow = AgentMenuBarSupport.knownWindow(id: shown)
+            .map { AgentMenuBarSupport.label($0, text: text, locale: locale) } ?? text.readoutLimit
+        return VStack(alignment: .leading, spacing: 10) {
+            SettingsMenuRow(symbol: "sparkles", title: text.menuBarAgent, selection: $menuBarProvider) {
+                ForEach(providers) { Text($0.displayName).tag($0.rawValue) }
+                if !providers.contains(provider) {
+                    Text(provider.displayName + " · " + text.notReported).tag(provider.rawValue)
+                }
+            }
+            SettingsMenuRow(symbol: NotchAgentCard.limits.symbol, title: text.limitFocus, selection: window) {
+                ForEach(windows) { Text(AgentMenuBarSupport.label($0, text: text, locale: locale)).tag($0.id) }
+                if !windows.contains(where: { $0.id == shown }) {
+                    Text(savedWindow + " · " + text.notReported).tag(shown)
+                }
+            }
         }
     }
 

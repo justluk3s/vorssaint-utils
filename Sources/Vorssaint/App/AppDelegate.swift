@@ -123,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self?.captureStatusClick()
             self?.showMetricPanel(for: metric, anchoredTo: button)
         }
+        statusController.onAgentUsageClick = { [weak self] button in
+            self?.captureStatusClick()
+            self?.showAgentUsagePanel(anchoredTo: button)
+        }
         statusController.onClipboardPreviewClick = {
             // No captureStatusClick() here, unlike the other click handlers:
             // it only ever helps anchor the main popover to a status item,
@@ -506,6 +510,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
            NotchSupport.modules().contains(.system) {
             NotchService.shared.showMetric(detailKind, toggle: true); return
         }
+        showMetricPopover(for: detailKind, anchoredTo: button)
+    }
+
+    /// The AI limit item opens the island's AI page where the island shows
+    /// the panel, and the popover on its own detail everywhere else.
+    private func showAgentUsagePanel(anchoredTo button: NSStatusBarButton) {
+        if NotchSupport.routesAppPanel(), NotchService.shared.acceptsSystemFeedback,
+           NotchSupport.modules().contains(.agents) {
+            NotchService.shared.open(.agents); return
+        }
+        showMetricPopover(for: .agents, anchoredTo: button)
+    }
+
+    private func showMetricPopover(for detailKind: MetricDetailKind, anchoredTo button: NSStatusBarButton) {
         if popoverIsOpen {
             if MenuPanelFocus.shared.activeMetric == detailKind {
                 metricAnchorSwitchSerial &+= 1

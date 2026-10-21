@@ -13,6 +13,7 @@ final class StatusItemController {
     var onRightClick: ((NSStatusBarButton?) -> Void)?
     var onMetricClick: ((MenuBarMetric, NSStatusBarButton) -> Void)?
     var onClipboardPreviewClick: (() -> Void)?
+    var onAgentUsageClick: ((NSStatusBarButton) -> Void)?
 
     private(set) var statusItem: NSStatusItem!
     /// The optional "show latest copy" item: same shape as a metric item —
@@ -20,6 +21,9 @@ final class StatusItemController {
     /// MenuBarMetric, since its content comes from ClipboardHistoryService
     /// rather than a SystemSnapshot reading.
     private var clipboardPreviewStatusItem: NSStatusItem?
+    /// The AI plan limit item: shaped like the clipboard preview, fed by
+    /// AgentUsageService rather than a SystemSnapshot reading.
+    private var agentUsageStatusItem: NSStatusItem?
     private var metricStatusItems: [String: NSStatusItem] = [:]
     private var metricStatusItemFocus: [String: MenuBarMetric] = [:]
     private var cancellables = Set<AnyCancellable>()
@@ -57,9 +61,13 @@ final class StatusItemController {
     /// so bind() only touches it once the feature is actually available,
     /// rather than for every launch regardless of whether anyone uses it.
     private var clipboardBindingsInstalled = false
+    /// True once the AI limit item follows the usage snapshot; until the
+    /// reading is first turned on, nothing here touches the service.
+    private var agentUsageBindingInstalled = false
     private static let mainAutosaveName = "VorssaintMenuBarItem"
     private static let metricAutosavePrefix = "VorssaintMetric"
     private static let clipboardPreviewAutosaveName = "VorssaintClipboardPreview"
+    private static let agentUsageAutosaveName = "VorssaintAgentUsage"
     private static let emptyStatusImage = NSImage()
 
     /// One separate menu bar item: a metric, or a metric with its temperature
@@ -82,7 +90,8 @@ final class StatusItemController {
     var button: NSStatusBarButton? { statusItem.button }
 
     func containsStatusItem(at screenPoint: NSPoint) -> Bool {
-        let items = [statusItem, clipboardPreviewStatusItem].compactMap { $0 } + Array(metricStatusItems.values)
+        let items = [statusItem, clipboardPreviewStatusItem, agentUsageStatusItem].compactMap { $0 }
+            + Array(metricStatusItems.values)
         // A hidden item keeps its last frame, which another app's item may
         // occupy by now.
         let buttons = items.filter(\.isVisible).compactMap(\.button)
@@ -213,6 +222,7 @@ final class StatusItemController {
             .store(in: &cancellables)
 
         bindClipboardPreviewIfAvailable()
+        bindAgentUsageIfEnabled()
 
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
                                                                   object: nil,
@@ -237,6 +247,8 @@ final class StatusItemController {
             self.refresh()
             self.bindClipboardPreviewIfAvailable()
             self.syncClipboardPreviewItem()
+            self.bindAgentUsageIfEnabled()
+            self.syncAgentUsageItem()
         }
     }
 
@@ -272,6 +284,9 @@ final class StatusItemController {
         }
         if let clipboardPreviewStatusItem {
             NSStatusBar.system.removeStatusItem(clipboardPreviewStatusItem)
+        }
+        if let agentUsageStatusItem {
+            NSStatusBar.system.removeStatusItem(agentUsageStatusItem)
         }
     }
 
@@ -755,6 +770,105 @@ final class StatusItemController {
         metricStatusItemFocus.removeValue(forKey: id)
         metricEmptyRenders.removeValue(forKey: id)
         guard let item = metricStatusItems.removeValue(forKey: id) else { return }
+        NSStatusBar.system.removeStatusItem(item)
+    }
+
+    // MARK: - AI limit item
+
+    /// Follows the usage snapshot from the first time the reading is on:
+    /// referencing AgentUsageService.shared any earlier would bring it to
+    /// life for people who never use it. The snapshot is published again as
+    /// time alone changes it, so a renewed window shows without a new log.
+    private func bindAgentUsageIfEnabled() {
+        guard !agentUsageBindingInstalled, NotchAgentSupport.menuBarReadoutEnabled() else { return }
+        agentUsageBindingInstalled = true
+        AgentUsageService.shared.$snapshot
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncAgentUsageItem() }
+            .store(in: &cancellables)
+    }
+
+    /// Shows the chosen window of the chosen agent, and keeps the item while
+    /// the reading is on but hidden while that window is not reported: an
+    /// item recreated later would lose a position the person dragged it to.
+    private func syncAgentUsageItem() {
+        let defaults = UserDefaults.standard
+        guard NotchAgentSupport.menuBarReadoutEnabled(in: defaults) else {
+            removeAgentUsageStatusItem()
+            return
+        }
+        let provider = AgentMenuBarSupport.provider(in: defaults)
+        let window = AgentMenuBarSupport.window(AgentUsageService.shared.snapshot, provider: provider,
+                                                choice: AgentMenuBarSupport.windowChoice(in: defaults), now: Date())
+        let item = agentUsageStatusItem ?? installAgentUsageStatusItem()
+        if item.length != NSStatusItem.variableLength {
+            item.length = NSStatusItem.variableLength
+        }
+        if item.isVisible != (window != nil) {
+            item.isVisible = window != nil
+        }
+        guard let button = item.button, let window else { return }
+        let image = AgentMarks.menuBarImage(for: provider)
+        if button.image !== image {
+            button.image = image
+        }
+        if button.imagePosition != .imageLeading {
+            button.imagePosition = .imageLeading
+        }
+        let font = MenuBarRenderer.statusFont(stacked: false)
+        if button.font?.isEqual(font) != true {
+            button.font = font
+        }
+        let language = L10n.shared.language
+        let locale = language.formattingLocale()
+        let display = NotchAgentSupport.limitDisplay(in: defaults)
+        let share = AgentMenuBarSupport.reading(window, display: display, locale: locale)
+        // The leading space separates the mark from the figure, as the main
+        // item's glyph from its metrics.
+        let title = " " + share
+        if button.title != title {
+            button.title = title
+        }
+        let text = FeatureStrings.notchAgents(language)
+        let toolTip = [provider.displayName, AgentMenuBarSupport.label(window, text: text, locale: locale),
+                       display == .remaining ? text.left(share) : text.usedShare(share)].joined(separator: " · ")
+        if button.toolTip != toolTip {
+            button.toolTip = toolTip
+        }
+    }
+
+    private func installAgentUsageStatusItem() -> NSStatusItem {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.autosaveName = Self.agentUsageAutosaveName
+        item.behavior = []
+        // Registered before it is shown, for the same reason as
+        // installMetricStatusItem: showing it writes and announces its
+        // remembered position while this call is still on the stack.
+        agentUsageStatusItem = item
+        item.isVisible = true
+        if let button = item.button {
+            button.font = MenuBarRenderer.statusFont(stacked: false)
+            button.alignment = .left
+            button.cell?.lineBreakMode = .byClipping
+            button.cell?.usesSingleLineMode = true
+            button.target = self
+            button.action = #selector(agentUsageClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        return item
+    }
+
+    @objc private func agentUsageClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            onRightClick?(sender)
+            return
+        }
+        onAgentUsageClick?(sender)
+    }
+
+    private func removeAgentUsageStatusItem() {
+        guard let item = agentUsageStatusItem else { return }
+        agentUsageStatusItem = nil
         NSStatusBar.system.removeStatusItem(item)
     }
 

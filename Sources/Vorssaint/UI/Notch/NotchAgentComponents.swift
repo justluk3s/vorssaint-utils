@@ -365,6 +365,38 @@ enum AgentMarks {
         }
         return nil
     }
+
+    private static var menuBarImages: [AgentProvider: NSImage?] = [:]
+
+    /// The same mark sized for a menu bar item: the app's own template image,
+    /// which follows the bar like any other, else its icon, else the symbol.
+    static func menuBarImage(for provider: AgentProvider) -> NSImage? {
+        if let image = menuBarImages[provider] { return image }
+        let image: NSImage?
+        switch mark(for: provider) {
+        case .template(let mark): image = resized(mark, height: 11 * provider.markScale, template: true)
+        case .icon(let icon): image = resized(icon, height: 16, template: false)
+        case nil:
+            image = NSImage(systemSymbolName: provider.symbol, accessibilityDescription: provider.displayName)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold))
+        }
+        menuBarImages[provider] = .some(image)
+        return image
+    }
+
+    private static func resized(_ image: NSImage, height: CGFloat, template: Bool) -> NSImage {
+        let copy = (image.copy() as? NSImage) ?? image
+        let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+        copy.size = NSSize(width: (height * aspect).rounded(), height: height.rounded())
+        copy.isTemplate = template
+        return copy
+    }
+}
+
+extension AgentProvider {
+    /// The menu bar images keep a margin; the spark's thin rays need more
+    /// of the box than the knot to look the same size.
+    var markScale: CGFloat { self == .claude ? 1.45 : 1.2 }
 }
 
 private extension AgentProvider {
@@ -378,9 +410,6 @@ private extension AgentProvider {
         }
     }
 
-    /// The menu bar images keep a margin; the spark's thin rays need more
-    /// of the box than the knot to look the same size.
-    var markScale: CGFloat { self == .claude ? 1.45 : 1.2 }
 
     /// What those apps name the mark they show in the menu bar.
     var menuBarImageNames: [String] {

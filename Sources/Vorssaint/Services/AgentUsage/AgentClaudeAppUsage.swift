@@ -33,7 +33,8 @@ enum AgentClaudeAppUsage {
         let used: [String: Double]
     }
 
-    private static let windows: [(key: String, kind: AgentLimitWindow.Kind, minutes: Int, scope: String?)] = [
+    /// Claude's windows; their ids are "claude." and the key, from either source.
+    static let windows: [(key: String, kind: AgentLimitWindow.Kind, minutes: Int, scope: String?)] = [
         ("fh", .session, 300, nil), ("sd", .weekly, 10_080, nil),
         ("so", .weekly, 10_080, "Opus"), ("sn", .weekly, 10_080, "Sonnet")]
 

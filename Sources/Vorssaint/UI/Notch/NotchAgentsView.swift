@@ -323,13 +323,7 @@ private struct NotchAgentLimitsCard: View {
 
     /// What the window covers: its length, or the model it is kept for.
     private func label(_ window: AgentLimitWindow) -> String {
-        switch window.kind {
-        case .session: return text.session
-        case .weekly: return window.scope.map { "\(text.weekly) · \($0)" } ?? text.weekly
-        case .other:
-            guard let minutes = window.minutes else { return window.scope ?? text.readoutLimit }
-            return AgentFormat.duration(TimeInterval(minutes) * 60, locale: locale, units: 1)
-        }
+        AgentMenuBarSupport.label(window, text: text, locale: locale)
     }
 
     /// How long until the window renews: days and hours, or hours and
