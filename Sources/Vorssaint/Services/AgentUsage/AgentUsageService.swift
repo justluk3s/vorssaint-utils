@@ -6,14 +6,15 @@ import Foundation
 import Network
 
 /// Reads Claude Code, Codex and GitHub Copilot usage from local session logs, and
-/// OpenCode usage from its database, while the AI section is on, along with
-/// the plan limits the Claude app saves. The files are read where they are,
-/// incrementally, and nothing is copied or sent: only counters are kept, in
-/// memory and in the app's private folder so the next launch reads only what
-/// the agents wrote meanwhile. OpenCode's stay in memory only, and its
-/// database is read again at each launch. Claude Code checks account-wide
-/// limits through its own CLI, including use on other machines. The public
-/// price list is fetched only when the person keeps prices up to date.
+/// OpenCode usage from its database, while the AI section or the menu bar
+/// reading is on, along with the plan limits the Claude app saves. The files
+/// are read where they are, incrementally, and nothing is copied or sent:
+/// only counters are kept, in memory and in the app's private folder so the
+/// next launch reads only what the agents wrote meanwhile. OpenCode's stay in
+/// memory only, and its database is read again at each launch. Claude Code
+/// checks account-wide limits through its own CLI, including use on other
+/// machines. The public price list is fetched only when the person keeps
+/// prices up to date.
 ///
 /// Reading happens on a private queue; the main thread and that queue hand
 /// work to each other asynchronously, except that a stop waits for progress
@@ -119,7 +120,7 @@ final class AgentUsageService: ObservableObject {
 
     func syncWithPreferences() {
         CodexProfileLimitsService.shared.synchronize()
-        guard NotchAgentSupport.isEnabled() else { stop(); return }
+        guard NotchAgentSupport.readsUsage() else { stop(); return }
         let wanted = NotchAgentSupport.providers()
         // An agent turned off is no longer read at all, and one turned on is
         // read from its start: both take a fresh reading, which would not
@@ -180,7 +181,7 @@ final class AgentUsageService: ObservableObject {
         // A first read still going stops at its next chunk, so the wait
         // below is short.
         if running { cancellation.cancel() }
-        settleArchive(keeping: keeps && NotchAgentSupport.isEnabled())
+        settleArchive(keeping: keeps && NotchAgentSupport.readsUsage())
         guard running else { return }
         running = false
         cancelClaudeLimits()

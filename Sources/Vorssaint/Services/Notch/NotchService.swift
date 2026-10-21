@@ -1119,7 +1119,9 @@ final class NotchService: ObservableObject {
         if !NotchFileToolsService.shared.offersMediaDrop { endFileDrop() }
         // Paused while the island is away, the section still stops at once
         // when it is turned off.
-        if !NotchAgentSupport.isEnabled() { AgentUsageService.shared.stop() }
+        if !NotchAgentSupport.readsUsage() { AgentUsageService.shared.stop() }
+        // Back on, the island takes the menu bar's reading over.
+        if NotchAgentSupport.menuBarReadoutEnabled() { AgentUsageMenuBarRunner.shared.syncWithPreferences() }
         guard !suspended else {
             if session.canRunTimer { NotchTimerService.shared.syncWithPreferences() }
             else { NotchTimerService.shared.suspend() }
@@ -1224,7 +1226,12 @@ final class NotchService: ObservableObject {
         if shortcutRegistrationFailed { shortcutRegistrationFailed = false }
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()
-        AgentUsageService.shared.stop()
+        // The menu bar may keep reading without the island. Handed over
+        // last, once the teardown below has paused the reading.
+        defer {
+            if NotchAgentSupport.menuBarReadoutEnabled() { AgentUsageMenuBarRunner.shared.syncWithPreferences() }
+        }
+        if !NotchAgentSupport.menuBarReadoutEnabled() { AgentUsageService.shared.stop() }
         guard running else { return }
         running = false
         NotchTimerService.shared.stop()

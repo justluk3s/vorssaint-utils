@@ -368,7 +368,8 @@ final class FeatureRuntime: ObservableObject {
         },
         .notchAgents: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
-            else { AgentUsageService.shared.stop() }
+            // Without the island, the menu bar reading alone may keep it running.
+            else { AgentUsageMenuBarRunner.shared.syncWithPreferences() }
         },
         .notchWatch: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }

@@ -39,6 +39,7 @@ enum NotchAgentTests {
         CodexAccountLimitsTests.run(suite)
         preferences(suite)
         limitUse(suite)
+        menuBarReading(suite)
         agentDefaults(suite)
         formatting(suite)
         AgentUsageEventDeliveryTests.run(suite)
@@ -3086,6 +3087,65 @@ enum NotchAgentTests {
         defaults.set(NotchIdleContent.agents.rawValue, forKey: DefaultsKey.notchIdleContent)
         suite.expect(alerts && unused && card && readout && liveOff && used(page: false),
                      "limits are in use for their alerts, a live limit reading, the resting island or the page's Limits card, and only then")
+    }
+
+    private static func menuBarReading(_ suite: TestSuite) {
+        let domain = "com.vorssaint.tests.notch-agent-menu-bar"
+        let defaults = UserDefaults(suiteName: domain)!
+        defaults.removePersistentDomain(forName: domain)
+        defer { defaults.removePersistentDomain(forName: domain) }
+        for (key, value) in Defaults.registeredDefaults where key.hasPrefix("notch") { defaults.set(value, forKey: key) }
+        for feature in AppFeature.allCases { defaults.set(true, forKey: feature.availabilityKey) }
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.menuBarAgentUsage] as? Bool == false,
+                     "the menu bar reading starts off")
+
+        // The rule before the menu bar reading, kept here as the reference.
+        func islandUsesLimits(page: Bool) -> Bool {
+            NotchAgentSupport.limitThreshold(in: defaults) != nil
+                || (NotchAgentSupport.showsLiveActivity(in: defaults) && NotchAgentSupport.readout(in: defaults) == .limit)
+                || NotchSupport.idleContent(in: defaults) == .agents
+                || (page && !NotchAgentSupport.hiddenCards(in: defaults).contains(.limits))
+        }
+        var unchanged = true
+        for island in [false, true] {
+            for section in [false, true] {
+                for installed in [false, true] {
+                    for alerts in [false, true] {
+                        defaults.set(island, forKey: DefaultsKey.notchEnabled)
+                        defaults.set(section, forKey: DefaultsKey.notchAgentsEnabled)
+                        defaults.set(installed, forKey: AppFeature.notchAgents.availabilityKey)
+                        defaults.set(alerts, forKey: DefaultsKey.notchAgentsLimitAlert)
+                        for page in [false, true] {
+                            unchanged = unchanged
+                                && NotchAgentSupport.readsUsage(in: defaults) == NotchAgentSupport.isEnabled(in: defaults)
+                                && NotchAgentSupport.limitsInUse(pageShown: page, in: defaults) == islandUsesLimits(page: page)
+                        }
+                    }
+                }
+            }
+        }
+        suite.expect(unchanged, "with the menu bar reading off, the island alone decides what is read and asked")
+
+        defaults.set(false, forKey: DefaultsKey.notchEnabled)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsEnabled)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsLimitAlert)
+        defaults.set(true, forKey: AppFeature.notchAgents.availabilityKey)
+        defaults.set(true, forKey: DefaultsKey.menuBarAgentUsage)
+        suite.expect(!NotchAgentSupport.isEnabled(in: defaults) && NotchAgentSupport.readsUsage(in: defaults)
+                        && NotchAgentSupport.limitsInUse(pageShown: false, in: defaults),
+                     "the menu bar reading reads usage and asks for limits with the island off")
+        defaults.set(false, forKey: AppFeature.notchAgents.availabilityKey)
+        suite.expect(!NotchAgentSupport.menuBarReadoutEnabled(in: defaults) && !NotchAgentSupport.readsUsage(in: defaults),
+                     "uninstalling the AI feature stops the menu bar reading too")
+
+        let decisions: [(Bool, Bool, Bool, NotchAgentSupport.MenuBarReading)] = [
+            (true, true, true, .island), (true, true, false, .island), (true, false, true, .island),
+            (false, false, true, .stop), (false, false, false, .stop),
+            (false, true, true, .run), (false, true, false, .pause),
+        ]
+        suite.expect(decisions.allSatisfy {
+            NotchAgentSupport.menuBarReading(islandOn: $0.0, readout: $0.1, canPresent: $0.2) == $0.3
+        }, "without the island the menu bar runs the reading, paused while the Mac is locked or asleep")
     }
 
     private static func preferences(_ suite: TestSuite) {

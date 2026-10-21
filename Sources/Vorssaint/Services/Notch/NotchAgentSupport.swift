@@ -83,6 +83,32 @@ enum NotchAgentSupport {
             && NotchSupport.modules(in: defaults).contains(.agents)
     }
 
+    /// The plan limit reading in the menu bar, which needs the AI feature
+    /// installed but neither the island nor its AI section.
+    static func menuBarReadoutEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        AppFeature.notchAgents.isAvailable(in: defaults) && defaults.bool(forKey: DefaultsKey.menuBarAgentUsage)
+    }
+
+    /// Whether anything reads the agents' usage: the island's AI section or
+    /// the menu bar reading. With the menu bar reading off, the island's rule.
+    static func readsUsage(in defaults: UserDefaults = .standard) -> Bool {
+        isEnabled(in: defaults) || menuBarReadoutEnabled(in: defaults)
+    }
+
+    /// What becomes of the reading while the island is off. While it is on,
+    /// the island starts and pauses the reading itself, the menu bar's too.
+    enum MenuBarReading: Equatable {
+        case island, run, pause, stop
+    }
+
+    /// Paused as the island pauses: locked, asleep, displays asleep or
+    /// another user at the console.
+    static func menuBarReading(islandOn: Bool, readout: Bool, canPresent: Bool) -> MenuBarReading {
+        if islandOn { return .island }
+        guard readout else { return .stop }
+        return canPresent ? .run : .pause
+    }
+
     static func providers(in defaults: UserDefaults = .standard) -> [AgentProvider] {
         AgentProvider.allCases.filter {
             defaults.object(forKey: key(for: $0)) as? Bool ?? true
@@ -200,10 +226,12 @@ enum NotchAgentSupport {
     }
 
     /// Whether anything shows or alerts on the plan limits: their alerts, the
-    /// live reading when it shows a limit, the resting island's allowance or,
-    /// while the AI page shows, its Limits card. Nothing asks for them otherwise.
+    /// live reading when it shows a limit, the resting island's allowance,
+    /// the menu bar reading or, while the AI page shows, its Limits card.
+    /// Nothing asks for them otherwise.
     static func limitsInUse(pageShown: Bool, in defaults: UserDefaults = .standard) -> Bool {
         limitThreshold(in: defaults) != nil
+            || menuBarReadoutEnabled(in: defaults)
             || (showsLiveActivity(in: defaults) && readout(in: defaults) == .limit)
             || NotchSupport.idleContent(in: defaults) == .agents
             || (pageShown && !hiddenCards(in: defaults).contains(.limits))

@@ -299,6 +299,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
         CommandBarService.shared.restoreBorrowedInputSource()
+        // Before the island, which would otherwise hand the reading back.
+        if NotchAgentSupport.menuBarReadoutEnabled() { AgentUsageMenuBarRunner.shared.quit() }
         if AppFeature.notch.isAvailable { NotchService.shared.stop(restoreCapture: false) }
         // Quitting properly means the start worked, whenever it happened.
         endStartupWatch()
